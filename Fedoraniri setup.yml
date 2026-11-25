@@ -1,0 +1,362 @@
+---
+- name: Universal Setup - Ultimate Fedora Complete Post-Install
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    # 💡 CONFIGURATION: change these for your own fork
+    github_user: "mrkv60"
+    dotfiles_repo: "https://github.com/{{ github_user }}/dotfiles.git"
+    dotfiles_version: "main"
+
+    # Third-party repositories needed for DMS and Ghostty
+    copr_repos:
+      - duxlabs/dms-git
+      - duxlabs/dux-repo
+      - avengemedia/danklinux
+
+    # Set to false on repeat runs to skip the full package upgrade
+    run_upgrade: true
+
+    # Hardware video decoder for libva; set to "iHD", "nvidia", "radeonsi", or "" to omit
+    libva_driver: ""
+
+    # Set to true to allow the playbook to reboot after package upgrades
+    reboot_after_setup: false
+
+    # Path mappings
+    user_home: "{{ ansible_env.HOME }}"
+    temp_dir: "{{ user_home }}/.local/share/fedoraniri/dotfiles_deployment"
+
+       # Core Applications to install natively via DNF5
+    dnf_apps:
+      - niri
+      - dms                    # Official DankMaterialShell package
+      - greetd                 # Backend framework for DMS Greeter
+      - wl-clipboard           # Required for DMS clipboard & launcher history pipelines
+      - xorg-x11-server-Xwayland
+      - git
+      - flatpak                 # Required by community.general.flatpak modules
+      - curl
+      - wget
+      - ark
+      - ghostty
+      - neovim
+      - starship
+      - eza
+      - aria2
+      - fastfetch
+      - btop
+      - gwenview
+      - brightnessctl
+      - thunar
+      - timeshift
+      - konsole
+      - plasma-discover
+      - waybar                 # Fallback modular status panel
+      - lxqt-policykit-agent   # Automated GUI Polkit framework
+      - wireplumber            # Modern multimedia session engine
+      - pipewire-utils
+      - bluez                  # Essential Bluetooth kernel daemons
+      - blueman                # System tray Bluetooth agent
+
+    # Productivity/GUI Applications via Sandboxed Flathub
+    flatpak_apps:
+      - org.mozilla.firefox
+      - com.brave.Browser
+      - org.libreoffice.LibreOffice
+      - org.kde.kate
+      - org.localsend.localsend_app
+      - org.filezillaproject.Filezilla
+      - uk.org.greenend.chiark.sgtatham.putty
+      - org.mozilla.thunderbird
+      - org.videolan.VLC
+      - com.helix_editor.Helix
+      - org.qbittorrent.qBittorrent
+
+  tasks:
+    # ==========================================================
+    # 0. Third-party repositories
+    # ==========================================================
+    - name: Enable required COPR repositories
+      community.general.copr:
+        name: "{{ item }}"
+        state: enabled
+      loop: "{{ copr_repos }}"
+      become: true
+
+    # ==========================================================
+    # 1. DNF Tuning & Package Management (Requires Sudo)
+    # ==========================================================
+    - name: Boost DNF Package Manager Performance
+      ansible.builtin.lineinfile:
+        path: /etc/dnf/dnf.conf
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "max_parallel_downloads=10"
+        - "fastestmirror=True"
+        - "defaultyes=True"
+      become: true
+
+    - name: Notify user about long upgrade wait time
+      ansible.builtin.debug:
+        msg: "🚀 STARTING FEDORA UPGRADE: Pulling latest packages. This might take several minutes, please do not close the terminal..."
+      when: ansible_facts['distribution'] == "Fedora" and run_upgrade | bool
+
+    - name: Run complete system package upgrade
+      ansible.builtin.dnf5:
+        name: "*"
+        state: latest
+        update_cache: true
+      become: true
+      when: ansible_facts['distribution'] == "Fedora" and run_upgrade | bool
+      notify: Cleanup and Reboot Fedora
+
+    - name: Install RPM Fusion free and nonfree release packages
+      ansible.builtin.dnf5:
+        name:
+          - "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-{{ ansible_distribution_major_version }}.noarch.rpm"
+          - "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-{{ ansible_distribution_major_version }}.noarch.rpm"
+        state: present
+      become: true
+      when: ansible_facts['distribution'] == "Fedora"
+
+    - name: Install Native DNF Utilities, Compositor, and DMS Integration Tools
+      ansible.builtin.dnf5:
+        name: "{{ dnf_apps }}"
+        state: present
+      become: true
+      notify:
+        - Enable DMS greeter in greetd
+        - Sync user DMS settings to greeter
+        - Enable Bluetooth System Services
+
+    # ==========================================================
+    # 2. Flatpak Environment Setup (User Space)
+    # ==========================================================
+    - name: Register and verify Flathub repository
+      community.general.flatpak_remote:
+        name: flathub
+        state: present
+        flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
+        method: user
+
+    - name: Deploy sandbox productivity flatpaks
+      community.general.flatpak:
+        name: "{{ item }}"
+        state: present
+        method: user
+      loop: "{{ flatpak_apps }}"
+
+    # ==========================================================
+    # 3. Secure Asset/Dotfile Syncing & Configuration
+    # ==========================================================
+    - name: Ensure target configuration ecosystem exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config"
+        state: directory
+        mode: '0755'
+
+    - name: Clear stale staging directory
+      ansible.builtin.file:
+        path: "{{ temp_dir }}"
+        state: absent
+
+    - name: Create private staging directory
+      ansible.builtin.file:
+        path: "{{ temp_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Dotfile deployment
+      block:
+        # no_log protects credentials if dotfiles_repo is overridden with a credentialed URL.
+        - name: Clone dotfiles repository over HTTPS
+          ansible.builtin.git:
+            repo: "{{ dotfiles_repo }}"
+            dest: "{{ temp_dir }}"
+            version: "{{ dotfiles_version }}"
+            clone: true
+          no_log: true
+
+        - name: Check if a local conflicting Niri profile exists
+          ansible.builtin.stat:
+            path: "{{ user_home }}/.config/niri"
+          register: niri_check
+
+        - name: Back up conflicting Niri configuration with a timestamp
+          ansible.builtin.command:
+            argv:
+              - mv
+              - "{{ user_home }}/.config/niri"
+              - "{{ user_home }}/.config/niri.bak.{{ ansible_date_time.iso8601_basic_short }}"
+          when: niri_check.stat.exists and niri_check.stat.isdir
+          changed_when: true
+
+        - name: Core Configuration Deployment Block
+          block:
+            - name: Check for optional Waybar configuration in dotfiles
+              ansible.builtin.stat:
+                path: "{{ temp_dir }}/waybar"
+              register: waybar_check
+
+            - name: Deploy configuration directories
+              ansible.builtin.copy:
+                src: "{{ temp_dir }}/{{ item }}/"
+                dest: "{{ user_home }}/.config/{{ item }}/"
+                remote_src: true
+                mode: 'preserve'
+              loop:
+                - niri
+                - nvim
+                - waybar
+              when: item != 'waybar' or waybar_check.stat.exists
+              notify: Inject critical DMS launcher and media keybindings into Niri configuration
+
+            - name: Deploy configuration files
+              ansible.builtin.copy:
+                src: "{{ temp_dir }}/{{ item }}"
+                dest: "{{ user_home }}/.config/{{ item }}"
+                remote_src: true
+                mode: 'preserve'
+              loop:
+                - starship.toml
+
+            - name: Initialize Starship layout strings within local Bash parameters
+              ansible.builtin.lineinfile:
+                path: "{{ user_home }}/.bashrc"
+                line: 'eval "$(starship init bash)"'
+                state: present
+          rescue:
+            - name: Report configuration deployment failure
+              ansible.builtin.fail:
+                msg: >-
+                  Core configuration deployment failed. The copy task above shows the cause;
+                  no fallback prompt configuration is implemented yet.
+
+        - name: Check if remote Alacritty configuration properties exist
+          ansible.builtin.stat:
+            path: "{{ temp_dir }}/alacritty"
+          register: alacritty_check
+
+        - name: Layout Alacritty definitions conditionally
+          ansible.builtin.copy:
+            src: "{{ temp_dir }}/alacritty/"
+            dest: "{{ user_home }}/.config/alacritty/"
+            remote_src: true
+            mode: 'preserve'
+          when: alacritty_check.stat.exists
+
+        - name: Check for bundled extra environments and miscellaneous objects
+          ansible.builtin.stat:
+            path: "{{ temp_dir }}/_extra_backup"
+          register: extra_check
+
+        - name: Overlay assets, fonts, scripts, and workflows directly to Home
+          ansible.builtin.copy:
+            src: "{{ temp_dir }}/_extra_backup/"
+            dest: "{{ user_home }}/"
+            remote_src: true
+            mode: 'preserve'
+          when: extra_check.stat.exists
+      always:
+        - name: Remove private staging directory
+          ansible.builtin.file:
+            path: "{{ temp_dir }}"
+            state: absent
+
+    - name: Install Wayland environment for PAM and systemd sessions
+      ansible.builtin.template:
+        src: fedoraniri-environment.conf.j2
+        dest: /etc/environment.d/99-fedoraniri.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+
+    - name: Set shell editor and terminal preferences
+      ansible.builtin.lineinfile:
+        path: "{{ user_home }}/.bashrc"
+        line: "{{ item }}"
+        create: true
+        mode: '0644'
+      loop:
+        - 'export TERMINAL="ghostty"'
+        - 'export EDITOR="nvim"'
+        - 'export VISUAL="nvim"'
+
+    - name: Remove obsolete Wayland block from bash profile
+      ansible.builtin.blockinfile:
+        path: "{{ user_home }}/.bash_profile"
+        marker: "# {mark} ANSIBLE MANAGED WAYLAND ENGINE OPTIMIZATIONS"
+        state: absent
+
+    # ==========================================================
+    # 4. Final Cleanup Operations (Requires Sudo)
+    # ==========================================================
+    - name: Remove orphaned DNF packages
+      ansible.builtin.dnf5:
+        autoremove: true
+      become: true
+
+    - name: Clear DNF5 package cache
+      ansible.builtin.command:
+        cmd: dnf5 clean all
+      become: true
+      changed_when: false
+
+    - name: Announce target setup completions
+      ansible.builtin.debug:
+        msg: "🎉 Setup completed. Reboot when convenient, then log in via your newly themed DMS Greeter and enjoy Niri!"
+
+  handlers:
+    - name: Enable DMS greeter in greetd
+      ansible.builtin.command:
+        argv:
+          - dms-greeter
+          - enable
+          - --yes
+      become: true
+      changed_when: true
+
+    - name: Sync user DMS settings to greeter
+      ansible.builtin.command:
+        argv:
+          - dms-greeter
+          - sync
+          - --yes
+      changed_when: true
+
+    - name: Inject critical DMS launcher and media keybindings into Niri configuration
+      ansible.builtin.blockinfile:
+        path: "{{ user_home }}/.config/niri/config.kdl"
+        create: true
+        mode: '0644'
+        marker: "// {mark} ANSIBLE MANAGED DMS KEYBINDINGS"
+        block: |
+          binds {
+              Mod+Space       { spawn "dms-launcher"; }
+              Mod+D           { spawn "dms-launcher"; }
+              Mod+Return      { spawn "ghostty"; }
+              Mod+L           { spawn "dms-greeter" "--lock"; }
+              XF86AudioRaiseVolume  allow-inhibited=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "5%+"; }
+              XF86AudioLowerVolume  allow-inhibited=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "5%-"; }
+              XF86AudioMute         allow-inhibited=true { spawn "wpctl" "set-mute"   "@DEFAULT_AUDIO_SINK@" "toggle"; }
+              XF86MonBrightnessUp   allow-inhibited=true { spawn "brightnessctl" "set" "5%+"; }
+              XF86MonBrightnessDown allow-inhibited=true { spawn "brightnessctl" "set" "5%-"; }
+          }
+
+    - name: Enable Bluetooth System Services
+      ansible.builtin.systemd_service:
+        name: bluetooth.service
+        state: started
+        enabled: true
+      become: true
+
+    - name: Cleanup and Reboot Fedora
+      ansible.builtin.reboot:
+        msg: "Ansible-initiated reboot for Fedora updates."
+        post_reboot_delay: 15
+      when: reboot_after_setup | bool

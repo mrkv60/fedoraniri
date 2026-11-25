@@ -1,0 +1,26 @@
+# Managed by Fedoraniri setup — do not edit by hand.
+# Read by PAM logins and the systemd user manager, so greetd-launched
+# Niri sessions and DMS applications inherit these values.
+
+# Wayland toolkits
+MOZ_ENABLE_WAYLAND=1
+QT_QPA_PLATFORM="wayland;xcb"
+GDK_BACKEND="wayland,x11,*"
+CLUTTER_BACKEND="wayland"
+
+# Electron / Chromium
+NIXOS_OZONE_WL=1
+ELECTRON_OZONE_PLATFORM_HINT="auto"
+
+# Desktop environment
+XDG_CURRENT_DESKTOP="niri"
+XDG_SESSION_DESKTOP="niri"
+XDG_SESSION_TYPE="wayland"
+
+# Java UI fix
+_JAVA_AWT_WM_NONREPARENTING=1
+
+{% if libva_driver | length > 0 %}
+# Hardware video decoding; override with -e libva_driver=...
+LIBVA_DRIVER_NAME="{{ libva_driver }}"
+{% endif %}

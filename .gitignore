@@ -1,0 +1,29 @@
+# Secrets and credentials
+.env
+*.env
+secrets.yml
+secrets.yaml
+vault.yml
+vault.yaml
+*vault*.yml
+.vault_pass
+.ssh/
+
+# Ansible
+*.retry
+
+# Editor and OS scratch
+*.swp
+*.swo
+*.kate-swp
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local logs and generated reports
+*.log
+sys_check.log
+system_report.md
