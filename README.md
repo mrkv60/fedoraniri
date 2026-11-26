@@ -20,8 +20,8 @@ Developer-facing architecture notes are in [docs/DESIGN.md](docs/DESIGN.md).
 4. Installs native DNF packages (compositor, shell, terminal, utilities, Flatpak CLI).
 5. Adds Flathub and installs a set of Flatpak applications.
 6. Clones a dotfiles repository into a private `0700` staging directory and removes it afterward.
-7. Backs up an existing Niri config to a timestamped path, deploys `niri`, `starship.toml`, `nvim`, `waybar` (if present), `alacritty`, and `_extra_backup` into `$HOME/.config` and `$HOME`, and injects marked DMS keybindings into `config.kdl`.
-8. Writes Wayland environment variables to `/etc/environment.d/99-fedoraniri.conf`, removes the old `~/.bash_profile` block, and keeps shell-only preferences in `~/.bashrc` alongside the Starship hook.
+7. Backs up an existing Niri config to a timestamped path, deploys `niri`, `nvim`, `waybar` (if present), `alacritty`, and `_extra_backup` into `$HOME/.config` and `$HOME`, and injects marked DMS keybindings into `config.kdl`.
+8. Writes Wayland environment variables to `/etc/environment.d/99-fedoraniri.conf`, removes the old `~/.bash_profile` block, and keeps shell-only preferences in `~/.bashrc`.
 9. Removes orphaned packages and clears the DNF cache.
 
 Failures in any of these steps stop the play — there are no `ignore_errors` tasks left.
@@ -36,7 +36,7 @@ DMS greeter launches Niri directly rather than through `niri-session`, so a logi
 - A normal (non-root) user with `sudo` access — the playbook prompts for a password with `-K`.
 - Network access.
 - Run `./bootstrap.sh` first on a fresh install: it installs `ansible`, the `community.general` collection, and the DNF COPR plugin support.
-- The playbook itself enables the COPR repositories that provide `dms` and `ghostty`: `duxlabs/dms-git`, `duxlabs/dux-repo`, and `avengemedia/danklinux`.
+- The playbook itself enables the COPR repositories that provide `dms` and `ghostty` using the native `dnf5 copr` command: `duxlabs/dms-git`, `duxlabs/dux-repo`, and `avengemedia/danklinux`.
 - A dotfiles repository you can clone. The default is `https://github.com/mrkv60/dotfiles.git`; see [Private dotfiles repository](#-private-dotfiles-repository) if yours is private.
 
 ## 🚀 Quick start
@@ -123,7 +123,7 @@ Static checks used before publishing (all passed):
 | Shell lint | `shellcheck bootstrap.sh` |
 | Bash formatting | `shfmt -d bootstrap.sh` |
 
-Before changing a real machine, run `ansible-playbook -i localhost, --check --diff -K 'Fedoraniri setup.yml'` and review the diff. A disposable Fedora VM run is still recommended.
+Before changing a real machine, run `ansible-playbook -i localhost, --check --diff -K 'Fedoraniri setup.yml'` and review the diff. A disposable Fedora container check-mode run was used during development; a full Fedora VM run is still recommended.
 
 ## 🚦 Exit codes
 
@@ -141,7 +141,7 @@ These are intentional learning exercises still to be worked through:
 
 - A real Fedora Everything VM dry run has not been performed; verification is static only.
 - Rebooting is opt-in via `reboot_after_setup`. Handlers were reordered so DMS setup, keybindings, and Bluetooth run first, but if you enable the reboot the playbook will not continue afterwards.
-- `peazip` and the nonexistent `@multimedia` group were removed from the playbook because neither exists in the Fedora 45 repos used here.
+- `peazip`, the nonexistent `@multimedia` group, `starship`, and `lxqt-policykit-agent` were removed because they are unavailable in the Fedora 45 repos and COPRs used here. `polkit-kde` replaces the LXQt polkit agent.
 - `io.github.marmgros.waypaper` was removed because it is not published on Flathub; the Helix ID was corrected to `com.helix_editor.Helix`. The other eleven Flatpak IDs were verified against Flathub.
 - `fastestmirror=True` is a DNF4 setting and is ignored by DNF5.
 - Hardware video decoding is opt-in: no `LIBVA_DRIVER_NAME` is set unless you pass `libva_driver`.

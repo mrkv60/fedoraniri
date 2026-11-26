@@ -43,7 +43,6 @@
       - ark
       - ghostty
       - neovim
-      - starship
       - eza
       - aria2
       - fastfetch
@@ -55,7 +54,7 @@
       - konsole
       - plasma-discover
       - waybar                 # Fallback modular status panel
-      - lxqt-policykit-agent   # Automated GUI Polkit framework
+      - polkit-kde             # Available GUI Polkit agent on Fedora 45
       - wireplumber            # Modern multimedia session engine
       - pipewire-utils
       - bluez                  # Essential Bluetooth kernel daemons
@@ -79,12 +78,25 @@
     # ==========================================================
     # 0. Third-party repositories
     # ==========================================================
-    - name: Enable required COPR repositories
-      community.general.copr:
-        name: "{{ item }}"
-        state: enabled
-      loop: "{{ copr_repos }}"
+    - name: List enabled COPR repositories
+      ansible.builtin.command:
+        cmd: dnf5 copr list
       become: true
+      changed_when: false
+      register: copr_enabled
+
+    - name: Enable required COPR repositories
+      ansible.builtin.command:
+        argv:
+          - dnf5
+          - copr
+          - enable
+          - -y
+          - "{{ item }}"
+      loop: "{{ copr_repos }}"
+      when: item not in copr_enabled.stdout
+      become: true
+      changed_when: true
 
     # ==========================================================
     # 1. DNF Tuning & Package Management (Requires Sudo)
@@ -215,26 +227,11 @@
               when: item != 'waybar' or waybar_check.stat.exists
               notify: Inject critical DMS launcher and media keybindings into Niri configuration
 
-            - name: Deploy configuration files
-              ansible.builtin.copy:
-                src: "{{ temp_dir }}/{{ item }}"
-                dest: "{{ user_home }}/.config/{{ item }}"
-                remote_src: true
-                mode: 'preserve'
-              loop:
-                - starship.toml
-
-            - name: Initialize Starship layout strings within local Bash parameters
-              ansible.builtin.lineinfile:
-                path: "{{ user_home }}/.bashrc"
-                line: 'eval "$(starship init bash)"'
-                state: present
           rescue:
             - name: Report configuration deployment failure
               ansible.builtin.fail:
                 msg: >-
-                  Core configuration deployment failed. The copy task above shows the cause;
-                  no fallback prompt configuration is implemented yet.
+                  Core configuration deployment failed. The copy task above shows the cause.
 
         - name: Check if remote Alacritty configuration properties exist
           ansible.builtin.stat:

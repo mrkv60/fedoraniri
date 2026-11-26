@@ -43,10 +43,10 @@ Fedoraniri setup.yml
 
 ## 🔄 Execution flow
 
-1. **Repositories first.** `community.general.copr` enables `duxlabs/dms-git`, `duxlabs/dux-repo`, and `avengemedia/danklinux` so later DNF installs can resolve `dms` and `ghostty`.
+1. **Repositories first.** A read-only `dnf5 copr list` is registered, then native `dnf5 copr enable -y` commands enable `duxlabs/dms-git`, `duxlabs/dux-repo`, and `avengemedia/danklinux` when missing, so later DNF installs can resolve `dms` and `ghostty`.
 2. **DNF phase.** Three `dnf.conf` lines are added with `lineinfile`. The full upgrade and its user notice are gated by `run_upgrade | bool`, then RPM Fusion release RPMs are installed, followed by the `dnf_apps` list.
 3. **Flatpak phase.** Flathub is registered with `method: user`, and each ID in `flatpak_apps` is installed through `community.general.flatpak`. All remaining IDs were checked with `flatpak remote-info --user flathub`.
-4. **Dotfile phase.** A `0700` directory under `~/.local/share/fedoraniri` is cleared and recreated. A `block` clones a pinned branch/tag (`dotfiles_version`), backs up an existing `~/.config/niri` to a timestamped sibling path, copies directory contents (with trailing slashes) and files, then removes the staging directory in `always`.
+4. **Dotfile phase.** A `0700` directory under `~/.local/share/fedoraniri` is cleared and recreated. A `block` clones a pinned branch/tag (`dotfiles_version`), backs up an existing `~/.config/niri` to a timestamped sibling path, copies directory contents (with trailing slashes), then removes the staging directory in `always`.
 5. **Environment phase.** The Jinja2 template renders `/etc/environment.d/99-fedoraniri.conf`. `LIBVA_DRIVER_NAME` is emitted only when `libva_driver` is non-empty. Shell-only editor/terminal variables go to `~/.bashrc`; the old managed block in `~/.bash_profile` is removed.
 6. **Cleanup phase.** `dnf5 autoremove` and `dnf5 clean all` run with `become: true`.
 7. **Handlers.** Package changes notify greeter enable (root), greeter sync (normal user), and Bluetooth. Niri config changes notify the marked `blockinfile` keybindings block. Reboot is last and only when `reboot_after_setup` is true.
@@ -56,6 +56,7 @@ Fedoraniri setup.yml
 | Decision | Reason |
 | --- | --- |
 | Separate experimental repo | Keeps changes away from the maintained `ymlfiles/` playbook. |
+| Native `dnf5 copr` instead of `community.general.copr` | The Ansible module needs DNF4 Python bindings, which Fedora 45 does not provide; the dry run caught this. |
 | No credentials in files | Public-safe. Private repos use `ansible-vault` or runtime `-e`; the clone task uses `no_log: true`. |
 | No `ignore_errors` | A failed Flatpak, copy, or greeter step must fail the run rather than print a false success. |
 | Private staging + `always` cleanup | Avoids a predictable `/tmp` path and prevents a credential-bearing `.git/config` from surviving a failure. |
@@ -71,7 +72,7 @@ Fedoraniri setup.yml
 ## 📦 State and side effects
 
 - **System files:** `/etc/dnf/dnf.conf`, `/etc/environment.d/99-fedoraniri.conf`, RPM Fusion repos, COPR repos, installed packages, greetd configuration, Bluetooth service state.
-- **User files:** `~/.config/niri` (timestamped backup + deployed contents), `~/.config/{nvim,waybar,alacritty}`, `~/.config/starship.toml`, `~/.bashrc`, `~/.bash_profile` (legacy block removed), and anything in the dotfiles repo's `_extra_backup/` overlaid into `$HOME`.
+- **User files:** `~/.config/niri` (timestamped backup + deployed contents), `~/.config/{nvim,waybar,alacritty}`, `~/.bashrc`, `~/.bash_profile` (legacy block removed), and anything in the dotfiles repo's `_extra_backup/` overlaid into `$HOME`.
 - **User installs:** Flathub remote and Flatpak apps under the invoking user's Flatpak installation.
 - **Transient:** the `0700` staging directory is always deleted, including on failure.
 - **Reversible?** Partially. Package installs and config deploys are not automatically rolled back. Niri's old config is preserved under `niri.bak.<timestamp>`. Greetd changes can be undone with `dms-greeter uninstall`.
@@ -100,12 +101,16 @@ Static checks performed before publication:
 | Flatpak IDs | `flatpak remote-info --user flathub <id>` for every configured ID | pass (11 IDs) |
 | `blockinfile` idempotency | two local runs against a sample `config.kdl` | pass (one marker pair) |
 | `copy` nesting | local test with and without trailing slashes | pass (trailing slashes copy contents) |
+| Disposable Fedora 45 container dry run | `ansible-playbook -i localhost, --check --diff -e run_upgrade=false` in Podman | completed through every task and handler; only failure was the systemd-dependent Bluetooth handler |
 
-The playbook was **not** executed against the live system during verification.
+The dry run found and fixed three real issues: `community.general.copr` needs DNF4 Python bindings unavailable on Fedora 45; `starship` and `lxqt-policykit-agent` are not shipped in the configured repos/COPRs. It also confirmed idempotent COPR gating, all 11 verified Flatpak IDs, the staging cleanup on failure, and the single marked keybindings block.
+
+The playbook was **not** executed against the live system during verification. Check mode skips `command` tasks, so COPR repos were pre-enabled and the staging directory pre-populated with a local fake dotfiles repo to let later tasks resolve. A container has no systemd, so the Bluetooth `systemd_service` handler and the optional reboot handler cannot be exercised there.
 
 ## 🧭 Known limitations
 
-- No disposable Fedora Everything VM run has been performed yet; that remains the recommended real-world smoke test.
+- No disposable Fedora Everything VM run has been performed yet; that remains the recommended real-world smoke test. A disposable Fedora 45 container was used for check-mode testing instead.
+- `starship` and `lxqt-policykit-agent` are unavailable on Fedora 45 and were removed; `polkit-kde` replaces the latter.
 - `fastestmirror=True` is ignored by DNF5 and remains in `dnf.conf` for now.
 - Timestamped Niri backups accumulate and must be pruned manually.
 - Hardware video decoding requires an explicit `libva_driver` override.
