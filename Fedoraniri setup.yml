@@ -4,75 +4,12 @@
   connection: local
   gather_facts: true
 
+  vars_files:
+    - config.json
+
   vars:
-    # 💡 CONFIGURATION: change these for your own fork
-    github_user: "mrkv60"
-    dotfiles_repo: "https://github.com/{{ github_user }}/dotfiles.git"
-    dotfiles_version: "main"
-
-    # Third-party repositories needed for DMS and Ghostty
-    copr_repos:
-      - duxlabs/dms-git
-      - duxlabs/dux-repo
-      - avengemedia/danklinux
-
-    # Set to false on repeat runs to skip the full package upgrade
-    run_upgrade: true
-
-    # Hardware video decoder for libva; set to "iHD", "nvidia", "radeonsi", or "" to omit
-    libva_driver: ""
-
-    # Set to true to allow the playbook to reboot after package upgrades
-    reboot_after_setup: false
-
-    # Path mappings
     user_home: "{{ ansible_facts['env']['HOME'] }}"
     temp_dir: "{{ user_home }}/.local/share/fedoraniri/dotfiles_deployment"
-
-       # Core Applications to install natively via DNF5
-    dnf_apps:
-      - niri
-      - dms                    # Official DankMaterialShell package
-      - greetd                 # Backend framework for DMS Greeter
-      - wl-clipboard           # Required for DMS clipboard & launcher history pipelines
-      - xorg-x11-server-Xwayland
-      - git
-      - flatpak                 # Required by community.general.flatpak modules
-      - curl
-      - wget
-      - ark
-      - ghostty
-      - neovim
-      - eza
-      - aria2
-      - fastfetch
-      - btop
-      - gwenview
-      - brightnessctl
-      - thunar
-      - timeshift
-      - konsole
-      - plasma-discover
-      - waybar                 # Fallback modular status panel
-      - polkit-kde             # Available GUI Polkit agent on Fedora 45
-      - wireplumber            # Modern multimedia session engine
-      - pipewire-utils
-      - bluez                  # Essential Bluetooth kernel daemons
-      - blueman                # System tray Bluetooth agent
-
-    # Productivity/GUI Applications via Sandboxed Flathub
-    flatpak_apps:
-      - org.mozilla.firefox
-      - com.brave.Browser
-      - org.libreoffice.LibreOffice
-      - org.kde.kate
-      - org.localsend.localsend_app
-      - org.filezillaproject.Filezilla
-      - uk.org.greenend.chiark.sgtatham.putty
-      - org.mozilla.thunderbird
-      - org.videolan.VLC
-      - com.helix_editor.Helix
-      - org.qbittorrent.qBittorrent
 
   tasks:
     # ==========================================================

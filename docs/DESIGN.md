@@ -1,55 +1,65 @@
 # Fedoraniri Setup — Design Notes
 
 ![Status](https://img.shields.io/badge/Status-experimental-orange?style=for-the-badge)
-![Language](https://img.shields.io/badge/Language-Markdown-2ea44f?style=for-the-badge)
-![Deps](https://img.shields.io/badge/Deps-Ansible%20%2B%20Fedora%2045-2b6cb0?style=for-the-badge)
+![Language](https://img.shields.io/badge/Language-YAML%20%2B%20Python-2ea44f?style=for-the-badge)
+![Deps](https://img.shields.io/badge/Deps-Ansible%20optional%20%7C%20Fedora%2045-2b6cb0?style=for-the-badge)
 ![Safety](https://img.shields.io/badge/Safety-no%20stored%20secrets-2ea44f?style=for-the-badge)
 ![Docs](https://img.shields.io/badge/Docs-architecture-2ea44f?style=for-the-badge)
 
-Developer-facing notes for the experimental Fedora/Niri/DMS playbook. User-facing instructions are in the [README](../README.md).
+Developer-facing notes for the experimental Fedora/Niri/DMS setup. Two entry points share one configuration file. User-facing instructions are in the [README](../README.md).
 
 ## 🏗️ Architecture
 
-The project is deliberately small: one playbook, one Jinja2 template, one bootstrap script, and documentation.
+The project has two implementations of the same flow plus a single source of truth for configuration.
 
 | File | Responsibility |
 | --- | --- |
-| `Fedoraniri setup.yml` | Single localhost play. Owns all variables, tasks, and handlers. |
-| `templates/fedoraniri-environment.conf.j2` | Renders desktop environment variables into `/etc/environment.d/`. |
+| `config.json` | Shared defaults: repos, COPRs, flags, DNF apps, Flatpak IDs. JSON is valid YAML, so Ansible loads it with `vars_files`. |
+| `Fedoraniri setup.yml` | Declarative localhost play using Ansible modules and handlers. |
+| `fedoraniri.py` | Standalone stdlib-only implementation with its own check mode and idempotency helpers. |
+| `run.sh` | Thin wrapper that installs `python3` if missing and executes `fedoraniri.py`. |
+| `templates/fedoraniri-environment.conf.j2` | Ansible template for `/etc/environment.d/99-fedoraniri.conf`. |
 | `bootstrap.sh` | Installs Ansible, `community.general`, and the DNF COPR plugin on a fresh Fedora system. |
+| `tests/test_fedoraniri.py` | Pytest coverage for the Python helpers. |
 | `README.md` | User-facing requirements, configuration, usage, and limitations. |
-| `.gitignore` | Keeps vault files, env files, SSH material, and scratch output out of git. |
+| `.gitignore` | Keeps secrets, SSH material, caches, and scratch output out of git. |
 | `LICENSE` | MIT. |
 
-There is no inventory file, role layout, or external Python code. `-i localhost,` is used on the command line to avoid Ansible's implicit-localhost warning.
+There is no inventory file or role layout. `-i localhost,` is used on the command line to avoid Ansible's implicit-localhost warning.
 
 ```text
-operator
-   │
-   ▼
-bootstrap.sh ──► ansible + community.general + dnf COPR plugin
-   │
-   ▼
-Fedoraniri setup.yml
-   │
-   ├─ Phase 0: COPR repos
-   ├─ Phase 1: dnf.conf tuning → gated upgrade → RPM Fusion → RPM apps
-   ├─ Phase 2: Flathub remote → verified Flatpak app IDs
-   ├─ Phase 3: private staging → clone → backup/copy configs → cleanup (always)
-   ├─ Phase 4: /etc/environment.d template → shell preferences → legacy cleanup
-   ├─ Phase 5: autoremove → cache clean
-   └─ handlers: greeter enable → greeter sync → keybindings → Bluetooth → optional reboot
+                    config.json
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+   bootstrap.sh                     run.sh
+   (Ansible path)                   (Python path)
+          │                             │
+          ▼                             ▼
+   Fedoraniri setup.yml           fedoraniri.py
+          │                             │
+          └──────────────┬──────────────┘
+                         ▼
+              Phase 0: COPR repos
+              Phase 1: dnf.conf → gated upgrade → RPM Fusion → RPM apps
+              Phase 2: Flathub remote → verified Flatpak IDs
+              Phase 3: private staging → clone → backup/copy → cleanup
+              Phase 4: /etc/environment.d → shell prefs → legacy cleanup
+              Phase 5: autoremove → cache clean
+              Finish: greeter enable → greeter sync → keybindings → Bluetooth → optional reboot
 ```
 
 ## 🔄 Execution flow
 
 1. **Repositories first.** A read-only `dnf5 copr list` is registered, then native `dnf5 copr enable -y` commands enable `duxlabs/dms-git`, `duxlabs/dux-repo`, and `avengemedia/danklinux` when missing, so later DNF installs can resolve `dms` and `ghostty`.
-2. **DNF phase.** Three `dnf.conf` lines are added with `lineinfile`. The full upgrade and its user notice are gated by `run_upgrade | bool`, then RPM Fusion release RPMs are installed, followed by the `dnf_apps` list.
+2. **DNF phase.** Two applicable `dnf.conf` lines are added with `lineinfile` (`fastestmirror` was removed because DNF5 ignores it). The full upgrade and its user notice are gated by `run_upgrade | bool`, then RPM Fusion release RPMs are installed, followed by the `dnf_apps` list.
 3. **Flatpak phase.** Flathub is registered with `method: user`, and each ID in `flatpak_apps` is installed through `community.general.flatpak`. All remaining IDs were checked with `flatpak remote-info --user flathub`.
 4. **Dotfile phase.** A `0700` directory under `~/.local/share/fedoraniri` is cleared and recreated. A `block` clones a pinned branch/tag (`dotfiles_version`), backs up an existing `~/.config/niri` to a timestamped sibling path, copies directory contents (with trailing slashes), then removes the staging directory in `always`.
 5. **Environment phase.** The Jinja2 template renders `/etc/environment.d/99-fedoraniri.conf`. `LIBVA_DRIVER_NAME` is emitted only when `libva_driver` is non-empty. Shell-only editor/terminal variables go to `~/.bashrc`; the old managed block in `~/.bash_profile` is removed.
 6. **Cleanup phase.** `dnf5 autoremove` and `dnf5 clean all` run with `become: true`.
 7. **Handlers.** Package changes notify greeter enable (root), greeter sync (normal user), and Bluetooth. Niri config changes notify the marked `blockinfile` keybindings block. Reboot is last and only when `reboot_after_setup` is true.
+
+The Python implementation follows the same seven phases imperatively. Its helpers replace Ansible modules: `ensure_line()` for `lineinfile`, `write_text()` with a unified diff for `template`/`copy`, `managed_block()` for `blockinfile`, and `try/finally` for the staging cleanup. Handlers become ordinary functions called at the end.
 
 ## 🛡️ Safety decisions
 
@@ -57,7 +67,8 @@ Fedoraniri setup.yml
 | --- | --- |
 | Separate experimental repo | Keeps changes away from the maintained `ymlfiles/` playbook. |
 | Native `dnf5 copr` instead of `community.general.copr` | The Ansible module needs DNF4 Python bindings, which Fedora 45 does not provide; the dry run caught this. |
-| No credentials in files | Public-safe. Private repos use `ansible-vault` or runtime `-e`; the clone task uses `no_log: true`. |
+| Shared `config.json` | Both implementations consume the same defaults, preventing drift between the playbook and script. |
+| No credentials in files | Public-safe. Ansible uses `ansible-vault` or runtime `-e`; the clone task uses `no_log: true`. The Python script reads `GITHUB_TOKEN` from the environment and marks the clone command sensitive. |
 | No `ignore_errors` | A failed Flatpak, copy, or greeter step must fail the run rather than print a false success. |
 | Private staging + `always` cleanup | Avoids a predictable `/tmp` path and prevents a credential-bearing `.git/config` from surviving a failure. |
 | Timestamped Niri backup | Repeated runs no longer overwrite or nest into `niri.bak`. |
@@ -103,6 +114,13 @@ Static checks performed before publication:
 | `copy` nesting | local test with and without trailing slashes | pass (trailing slashes copy contents) |
 | Disposable Fedora 45 container dry run | `ansible-playbook -i localhost, --check --diff -e run_upgrade=false` in Podman | completed through every task and handler; only failure was the systemd-dependent Bluetooth handler |
 | Deprecation warnings | same container dry run | pass — 0 warnings after switching to `ansible_facts` |
+| Python compile | `python3 -m py_compile fedoraniri.py` | pass |
+| Python lint | `uvx ruff check fedoraniri.py tests/test_fedoraniri.py` | pass |
+| Python format | `uvx ruff format --check fedoraniri.py tests/test_fedoraniri.py` | pass |
+| Python types | `uvx mypy fedoraniri.py` | pass |
+| Python tests | `uvx pytest -q` | pass (6 tests) |
+| Python check mode | `python3 fedoraniri.py --check --dotfiles-repo /root/fake-dotfiles` in Podman | pass (exit 0), diffs shown for all file changes |
+| Shared config | Ansible dry run after moving vars to `config.json` | pass — playbook loads config and reaches package installation |
 
 The dry run found and fixed three real issues: `community.general.copr` needs DNF4 Python bindings unavailable on Fedora 45; `starship` and `lxqt-policykit-agent` are not shipped in the configured repos/COPRs. It also confirmed idempotent COPR gating, all 11 verified Flatpak IDs, the staging cleanup on failure, and the single marked keybindings block.
 
@@ -111,6 +129,7 @@ The playbook was **not** executed against the live system during verification. C
 ## 🧭 Known limitations
 
 - No disposable Fedora Everything VM run has been performed yet; that remains the recommended real-world smoke test. A disposable Fedora 45 container was used for check-mode testing instead.
+- The Python script's `--check` mode was exercised in the disposable container, but its full real run has not; only the Ansible path has been dry-run end to end.
 - `starship` and `lxqt-policykit-agent` are unavailable on Fedora 45 and were removed; `polkit-kde` replaces the latter.
 - `fastestmirror=True` was removed because DNF5 ignores it.
 - Timestamped Niri backups accumulate and must be pruned manually.
