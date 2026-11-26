@@ -26,7 +26,7 @@
     reboot_after_setup: false
 
     # Path mappings
-    user_home: "{{ ansible_env.HOME }}"
+    user_home: "{{ ansible_facts['env']['HOME'] }}"
     temp_dir: "{{ user_home }}/.local/share/fedoraniri/dotfiles_deployment"
 
        # Core Applications to install natively via DNF5
@@ -108,7 +108,6 @@
         state: present
       loop:
         - "max_parallel_downloads=10"
-        - "fastestmirror=True"
         - "defaultyes=True"
       become: true
 
@@ -129,8 +128,8 @@
     - name: Install RPM Fusion free and nonfree release packages
       ansible.builtin.dnf5:
         name:
-          - "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-{{ ansible_distribution_major_version }}.noarch.rpm"
-          - "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-{{ ansible_distribution_major_version }}.noarch.rpm"
+          - "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-{{ ansible_facts['distribution_major_version'] }}.noarch.rpm"
+          - "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-{{ ansible_facts['distribution_major_version'] }}.noarch.rpm"
         state: present
       become: true
       when: ansible_facts['distribution'] == "Fedora"

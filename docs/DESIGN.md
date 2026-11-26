@@ -102,6 +102,7 @@ Static checks performed before publication:
 | `blockinfile` idempotency | two local runs against a sample `config.kdl` | pass (one marker pair) |
 | `copy` nesting | local test with and without trailing slashes | pass (trailing slashes copy contents) |
 | Disposable Fedora 45 container dry run | `ansible-playbook -i localhost, --check --diff -e run_upgrade=false` in Podman | completed through every task and handler; only failure was the systemd-dependent Bluetooth handler |
+| Deprecation warnings | same container dry run | pass — 0 warnings after switching to `ansible_facts` |
 
 The dry run found and fixed three real issues: `community.general.copr` needs DNF4 Python bindings unavailable on Fedora 45; `starship` and `lxqt-policykit-agent` are not shipped in the configured repos/COPRs. It also confirmed idempotent COPR gating, all 11 verified Flatpak IDs, the staging cleanup on failure, and the single marked keybindings block.
 
@@ -111,7 +112,7 @@ The playbook was **not** executed against the live system during verification. C
 
 - No disposable Fedora Everything VM run has been performed yet; that remains the recommended real-world smoke test. A disposable Fedora 45 container was used for check-mode testing instead.
 - `starship` and `lxqt-policykit-agent` are unavailable on Fedora 45 and were removed; `polkit-kde` replaces the latter.
-- `fastestmirror=True` is ignored by DNF5 and remains in `dnf.conf` for now.
+- `fastestmirror=True` was removed because DNF5 ignores it.
 - Timestamped Niri backups accumulate and must be pruned manually.
 - Hardware video decoding requires an explicit `libva_driver` override.
 - Some upstream package names are Fedora 45 / COPR specific and may need adjustment on other releases.

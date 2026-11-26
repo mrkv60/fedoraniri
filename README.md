@@ -32,7 +32,7 @@ DMS greeter launches Niri directly rather than through `niri-session`, so a logi
 
 ## ✅ Prerequisites
 
-- Fedora 45 (the RPM Fusion URLs are templated on `ansible_distribution_major_version`).
+- Fedora 45 (the RPM Fusion URLs are templated on `ansible_facts['distribution_major_version']`).
 - A normal (non-root) user with `sudo` access — the playbook prompts for a password with `-K`.
 - Network access.
 - Run `./bootstrap.sh` first on a fresh install: it installs `ansible`, the `community.general` collection, and the DNF COPR plugin support.
@@ -75,7 +75,7 @@ All of these can be overridden at runtime with `-e`:
 | `run_upgrade` | `true` | Set to `false` on repeat runs to skip the full DNF upgrade. |
 | `reboot_after_setup` | `false` | Allow the upgrade task to reboot at the end of the run. |
 | `libva_driver` | `""` | Optional `LIBVA_DRIVER_NAME`; e.g. `-e libva_driver=iHD` for Intel or `nvidia`. |
-| `user_home` | `{{ ansible_env.HOME }}` | Target home directory. |
+| `user_home` | `{{ ansible_facts['env']['HOME'] }}` | Target home directory. |
 | `temp_dir` | `{{ user_home }}/.local/share/fedoraniri/dotfiles_deployment` | Private `0700` staging directory; removed after deployment. |
 | `dnf_apps` | see playbook | RPM packages to install. |
 | `flatpak_apps` | see playbook | Flatpak application IDs to install. |
@@ -143,7 +143,6 @@ These are intentional learning exercises still to be worked through:
 - Rebooting is opt-in via `reboot_after_setup`. Handlers were reordered so DMS setup, keybindings, and Bluetooth run first, but if you enable the reboot the playbook will not continue afterwards.
 - `peazip`, the nonexistent `@multimedia` group, `starship`, and `lxqt-policykit-agent` were removed because they are unavailable in the Fedora 45 repos and COPRs used here. `polkit-kde` replaces the LXQt polkit agent.
 - `io.github.marmgros.waypaper` was removed because it is not published on Flathub; the Helix ID was corrected to `com.helix_editor.Helix`. The other eleven Flatpak IDs were verified against Flathub.
-- `fastestmirror=True` is a DNF4 setting and is ignored by DNF5.
 - Hardware video decoding is opt-in: no `LIBVA_DRIVER_NAME` is set unless you pass `libva_driver`.
 - Timestamped Niri backups accumulate on repeated runs; prune old `niri.bak.*` directories manually if desired.
 - No token or credential is stored in this repository. For a private dotfiles repo, use the workflow documented above.
